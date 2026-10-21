@@ -204,7 +204,9 @@ BarWidget {
       Text {
         anchors.verticalCenter: parent.verticalCenter
         textFormat: Text.PlainText
-        text: root.playing ? "󰏤" : (root.hasMedia ? "󰐊" : "󰝚")
+        // Always the music note, as in icon mode: a pause/play glyph here
+        // reads as a button, but a left click opens the panel.
+        text: "󰝚"
         color: root.hasMedia && !root.playing ? Qt.darker(playerButton.foreground, 1.5) : playerButton.foreground
         font.family: playerButton.fontFamily
         font.pixelSize: Style.font.body
