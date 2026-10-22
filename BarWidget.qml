@@ -219,30 +219,51 @@ BarWidget {
         height: label.implicitHeight
         clip: true
 
-        Text {
-          id: label
-          textFormat: Text.PlainText
-          text: root.track ? Model.nowPlayingLabel(root.track) : "YouTube Music"
-          color: playerButton.foreground
-          opacity: root.track ? 1 : 0.58
-          font.family: playerButton.fontFamily
-          font.pixelSize: Style.font.body
+        // Continuous marquee: a second copy follows the text one gap behind,
+        // and the row slides by exactly one copy plus the gap at a constant
+        // speed, so each loop starts where the last one ended. Always rests at
+        // 0 when not scrolling (the built-in media widget leaves text stuck).
+        Row {
+          id: marquee
+          spacing: Style.space(40)
 
-          readonly property real overflow: Math.max(0, implicitWidth - clipItem.width)
+          readonly property real overflow: Math.max(0, label.implicitWidth - clipItem.width)
+          readonly property real cycle: label.implicitWidth + spacing
 
-          // Pause, scroll to the end, pause, return — and always rest at 0
-          // when not scrolling (the built-in media widget leaves text stuck).
-          SequentialAnimation on x {
-            id: scroll
-            running: label.overflow > 0 && root.playerMode && !root.opened
-            loops: Animation.Infinite
-            PauseAnimation { duration: 1800 }
-            NumberAnimation { from: 0; to: -label.overflow; duration: Math.max(2500, label.overflow * 28); easing.type: Easing.InOutSine }
-            PauseAnimation { duration: 1200 }
-            NumberAnimation { to: 0; duration: 350; easing.type: Easing.OutCubic }
+          Text {
+            id: label
+            textFormat: Text.PlainText
+            text: root.track ? Model.nowPlayingLabel(root.track) : "YouTube Music"
+            color: playerButton.foreground
+            opacity: root.track ? 1 : 0.58
+            font.family: playerButton.fontFamily
+            font.pixelSize: Style.font.body
+
+            onTextChanged: marquee.x = 0
           }
 
-          onTextChanged: x = 0
+          Text {
+            visible: marquee.overflow > 0
+            textFormat: Text.PlainText
+            text: label.text
+            color: label.color
+            opacity: label.opacity
+            font: label.font
+          }
+
+          NumberAnimation on x {
+            id: scroll
+            running: marquee.overflow > 0 && root.playerMode && !root.opened
+            loops: Animation.Infinite
+            from: 0
+            to: -marquee.cycle
+            // 25 ms per pixel, about 40 px/s.
+            duration: marquee.cycle * 25
+          }
+
+          // A running animation keeps its old distance, so start over when the
+          // text (or the font) changes its width.
+          onCycleChanged: if (scroll.running) scroll.restart()
         }
       }
     }
@@ -251,7 +272,7 @@ BarWidget {
   Connections {
     target: scroll
     function onRunningChanged() {
-      if (!scroll.running) label.x = 0
+      if (!scroll.running) marquee.x = 0
     }
   }
 }
