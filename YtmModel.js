@@ -17,6 +17,27 @@ function videoIdFromUrl(url) {
   return match ? match[1] : ""
 }
 
+// Songs from the Local tab are files: mpv's playlist holds their absolute
+// path, which is also their key in the metadata map and the saved session.
+// YouTube tracks are keyed by videoId (local ones have videoId "").
+function isLocalPath(text) {
+  return String(text || "").charAt(0) === "/"
+}
+
+function trackKey(track) {
+  return track ? String(track.videoId || track.path || "") : ""
+}
+
+function keyFromUrl(url) {
+  var videoId = videoIdFromUrl(url)
+  if (videoId) return videoId
+  return isLocalPath(url) ? String(url) : ""
+}
+
+function mediaUrl(track) {
+  return track.videoId ? trackUrl(track.videoId) : String(track.path || "")
+}
+
 function mediaTitle(track) {
   if (!track) return ""
   var title = String(track.title || "")
@@ -44,11 +65,11 @@ function loadfileOptions(track) {
 }
 
 function loadfile(track, flag) {
-  return ["loadfile", trackUrl(track.videoId), flag, -1, loadfileOptions(track)]
+  return ["loadfile", mediaUrl(track), flag, -1, loadfileOptions(track)]
 }
 
 function playable(track) {
-  return !!(track && track.videoId && track.available !== false)
+  return !!(track && trackKey(track) && track.available !== false)
 }
 
 // ---- queue commands ---------------------------------------------------------
@@ -222,12 +243,21 @@ function previousCommands(timePos) {
 
 // ---- queue model ------------------------------------------------------------
 
-function fallbackTrack(videoId, entry) {
-  return {
-    type: "track", videoId: videoId, title: String(entry.title || videoId || entry.filename || ""),
+// A placeholder for a key without metadata; a local file is named after
+// its file name.
+function fallbackTrack(key, entry) {
+  var local = isLocalPath(key)
+  var name = local ? key.replace(/^.*\//, "").replace(/\.[^.]*$/, "") : ""
+  var track = {
+    type: "track", videoId: local ? "" : key, title: String(entry.title || name || key || entry.filename || ""),
     artists: [], artistText: "", album: null, durationSec: null, thumb: null, thumbLarge: null,
     explicit: false, likeStatus: null, setVideoId: null, available: true, kind: "song", played: null
   }
+  if (local) {
+    track.local = true
+    track.path = key
+  }
+  return track
 }
 
 // mpv's `playlist` property joined with the per-track metadata map.
@@ -236,15 +266,16 @@ function buildQueue(playlist, meta) {
   var list = playlist || []
   for (var i = 0; i < list.length; i++) {
     var entry = list[i] || {}
-    var videoId = videoIdFromUrl(entry.filename)
-    var known = !!(meta && videoId && meta[videoId])
+    var key = keyFromUrl(entry.filename)
+    var known = !!(meta && key && meta[key])
     out.push({
       index: i,
       entryId: entry.id !== undefined ? entry.id : i,
-      videoId: videoId,
+      key: key,
+      videoId: isLocalPath(key) ? "" : key,
       current: !!entry.current,
       known: known,
-      track: known ? meta[videoId] : fallbackTrack(videoId, entry)
+      track: known ? meta[key] : fallbackTrack(key, entry)
     })
   }
   return out
@@ -254,8 +285,8 @@ function pruneMeta(meta, playlist) {
   var keep = {}
   var list = playlist || []
   for (var i = 0; i < list.length; i++) {
-    var videoId = videoIdFromUrl(list[i] && list[i].filename)
-    if (videoId && meta && meta[videoId]) keep[videoId] = meta[videoId]
+    var key = keyFromUrl(list[i] && list[i].filename)
+    if (key && meta && meta[key]) keep[key] = meta[key]
   }
   return keep
 }
@@ -424,6 +455,7 @@ function itemSubtitle(item) {
   if (item.type === "artist") return item.subtitle ? item.subtitle : "Artist"
   if (item.type === "liked") return "Songs you liked"
   if (item.type === "history") return "Recently played"
+  if (item.type === "folder") return item.subtitle || "Folder"
   return ""
 }
 
@@ -466,23 +498,26 @@ function historyRows(tracks) {
 }
 
 // ---- resume -----------------------------------------------------------------------
+// Version 2 keeps track keys (videoIds and local paths); version 1 had
+// videoIds only and is read as such.
 
 function sessionSnapshot(queue, index, timePos, volume, nowMs) {
-  var ids = []
+  var keys = []
   var meta = {}
   for (var i = 0; i < (queue || []).length; i++) {
     var entry = queue[i]
-    if (!entry.videoId) continue
-    ids.push(entry.videoId)
-    if (entry.known) meta[entry.videoId] = entry.track
+    var key = entry.key || entry.videoId
+    if (!key) continue
+    keys.push(key)
+    if (entry.known) meta[key] = entry.track
   }
   return {
-    version: 1,
+    version: 2,
     savedAt: nowMs,
     index: index,
     timePos: Math.max(0, Math.floor(Number(timePos) || 0)),
     volume: volume,
-    videoIds: ids,
+    keys: keys,
     meta: meta
   }
 }
@@ -490,7 +525,13 @@ function sessionSnapshot(queue, index, timePos, volume, nowMs) {
 function parseSession(text) {
   try {
     var session = JSON.parse(text)
-    return session && session.version === 1 && Array.isArray(session.videoIds) ? session : null
+    if (!session || typeof session !== "object") return null
+    if (session.version === 2 && Array.isArray(session.keys)) return session
+    if (session.version === 1 && Array.isArray(session.videoIds)) {
+      return { version: 2, savedAt: session.savedAt, index: session.index, timePos: session.timePos,
+               volume: session.volume, keys: session.videoIds, meta: session.meta || {} }
+    }
+    return null
   } catch (e) {
     return null
   }
@@ -498,10 +539,10 @@ function parseSession(text) {
 
 // Rebuild the saved queue and continue the saved track where it was.
 function resumeCommands(session) {
-  if (!session || !Array.isArray(session.videoIds) || session.videoIds.length === 0)
+  if (!session || !Array.isArray(session.keys) || session.keys.length === 0)
     return { commands: [], tracks: [], index: -1 }
-  var tracks = session.videoIds.map(function(id) {
-    return (session.meta && session.meta[id]) || fallbackTrack(id, {})
+  var tracks = session.keys.map(function(key) {
+    return (session.meta && session.meta[key]) || fallbackTrack(key, {})
   })
   var index = Math.max(0, Math.min(Number(session.index) || 0, tracks.length - 1))
   var commands = [["stop"]]
@@ -570,7 +611,22 @@ function collectionTarget(item) {
   if (item.type === "artist") return { kind: "artist", id: item.channelId }
   if (item.type === "liked") return { kind: "liked", id: "LM" }
   if (item.type === "history") return { kind: "history", id: "history" }
+  if (item.type === "folder") return { kind: "folder", id: item.path || "" }
   return null
+}
+
+// A folder page: its subfolders (they open), then its songs (trackIndex
+// points into page.tracks). Headers only when it has both.
+function folderRows(page) {
+  var rows = []
+  var folders = (page && page.folders) || []
+  var tracks = (page && page.tracks) || []
+  var both = folders.length > 0 && tracks.length > 0
+  if (both) rows.push({ header: true, title: "Folders" })
+  for (var i = 0; i < folders.length; i++) rows.push({ item: folders[i] })
+  if (both) rows.push({ header: true, title: "Songs" })
+  for (var j = 0; j < tracks.length; j++) rows.push({ item: tracks[j], trackIndex: j })
+  return rows
 }
 
 // ---- pre-resolved streams ---------------------------------------------------------
@@ -745,6 +801,11 @@ if (typeof module !== "undefined") {
     PLUGIN_ID: PLUGIN_ID,
     trackUrl: trackUrl,
     videoIdFromUrl: videoIdFromUrl,
+    isLocalPath: isLocalPath,
+    trackKey: trackKey,
+    keyFromUrl: keyFromUrl,
+    mediaUrl: mediaUrl,
+    playable: playable,
     mediaTitle: mediaTitle,
     utf8Length: utf8Length,
     loadfileOptions: loadfileOptions,
@@ -779,6 +840,7 @@ if (typeof module !== "undefined") {
     firstTrack: firstTrack,
     itemSubtitle: itemSubtitle,
     collectionTarget: collectionTarget,
+    folderRows: folderRows,
     ownedPlaylists: ownedPlaylists,
     libraryRows: libraryRows,
     homeRows: homeRows,

@@ -5,9 +5,11 @@
 #   "ytmusicapi==1.12.2",
 #   "yt-dlp",
 #   "secretstorage",
+#   "mutagen",
 # ]
 # ///
-"""damir.ytmusic backend: ytmusicapi behind a JSON-lines worker and a CLI.
+"""damir.ytmusic backend: ytmusicapi (and your local music folders) behind a
+JSON-lines worker and a CLI.
 
 The shell runs ``ytm.py serve``: one JSON request per stdin line, one JSON
 reply per stdout line. It exits on stdin EOF (so it can never outlive the
@@ -38,6 +40,7 @@ import traceback  # noqa: E402
 
 import ytm_auth as auth  # noqa: E402
 import ytm_cache as caches  # noqa: E402
+import ytm_local as local  # noqa: E402
 import ytm_normalize as norm  # noqa: E402
 import ytm_streams as streams  # noqa: E402
 
@@ -56,8 +59,9 @@ CACHEABLE = {"libraryPlaylists", "liked", "playlist", "album", "artist", "home",
 # while a search is still running. A lane handles its own requests one at a
 # time, in order; replies carry the request id, so they may overtake each
 # other. (ytmusicapi's requests session is shared with the suggest lane;
-# requests' connection pool and cookie jar are thread-safe.)
-LANES = {"resolve": "streams", "suggestions": "suggest"}
+# requests' connection pool and cookie jar are thread-safe.) Reading a big
+# music folder's tags the first time can take seconds, hence its own lane.
+LANES = {"resolve": "streams", "suggestions": "suggest", "localFolder": "local"}
 CACHE_MODES = ("prefer", "refresh", "bypass")
 # What an edit makes stale: (method, param to match or None for all).
 INVALIDATES = {
@@ -280,6 +284,20 @@ def m_up_next(worker, params):
     return {"playlistId": data.get("playlistId"), "items": [t for t in tracks if t["videoId"] != video_id]}
 
 
+def m_local_folder(worker, params):
+    """A folder of your music directory (``path`` "" = the top), or with
+    ``recursive`` every song inside it."""
+    path = params.get("path") or ""
+    if not isinstance(path, str):
+        raise WorkerError("BAD_REQUEST", "'path' must be a string")
+    try:
+        if params.get("recursive"):
+            return worker.local().tracks_under(path)
+        return worker.local().folder(path)
+    except local.LocalError as exc:
+        raise WorkerError(exc.code, exc.message) from exc
+
+
 def m_like_status(worker, params):
     worker.require_auth()
     video_id = req_str(params, "videoId")
@@ -367,6 +385,7 @@ METHODS = {
     "resolve": m_resolve,
     "warmStreams": m_warm_streams,
     "cacheThumbs": m_cache_thumbs,
+    "localFolder": m_local_folder,
     "likeStatus": m_like_status,
     "rate": m_rate,
     "createPlaylist": m_create_playlist,
@@ -377,13 +396,14 @@ METHODS = {
 
 
 class Worker:
-    def __init__(self, client=None, auth_state="none", resolver=None, cache=None, thumbs=None):
+    def __init__(self, client=None, auth_state="none", resolver=None, cache=None, thumbs=None, library=None):
         self.verified = False
         self._lock = threading.Lock()
         self._resolver = resolver
         self._warm_thread = None
         self._cache = cache
         self._thumbs = thumbs
+        self._library = library
         # Set by serve(): writes an unsolicited event line (thread-safe).
         self.emit = None
         if client is None:
@@ -419,6 +439,11 @@ class Worker:
         if self._thumbs is None:
             self._thumbs = caches.ThumbCache()
         return self._thumbs
+
+    def local(self):
+        if self._library is None:
+            self._library = local.Library()
+        return self._library
 
     def clear_cache(self):
         try:
@@ -635,6 +660,15 @@ def cmd_selftest(args):
             checks.append((False, label, f"{type(exc).__name__}: {exc}"))
 
     check("ytmusicapi import", lambda: f"ytmusicapi {ytmusicapi_version()}")
+    check("mutagen import (local music)", lambda: f"mutagen {__import__('mutagen').version_string}")
+
+    def music():
+        found = [local.display(d) for d in local.music_dirs() if os.path.isdir(d)]
+        if not found:
+            raise FileNotFoundError(f"no music folder: {', '.join(map(local.display, local.music_dirs()))}")
+        return ", ".join(found)
+
+    check("music folders", music)
     check("normalizer", lambda: norm.track({"videoId": "x", "title": "t", "length": "1:05",
                                           "artists": [{"name": "a", "id": None}]})["durationSec"] == 65 or 1 / 0)
 

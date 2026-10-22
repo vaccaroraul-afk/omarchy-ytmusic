@@ -6,7 +6,8 @@ import "YtmModel.js" as Model
 // Single service instance for damir.ytmusic. Playback state is mirrored from
 // the detached mpv player (which owns the queue and per-track metadata, so
 // both survive plugin reloads); library/search calls go to the ytmusicapi
-// worker. Bar widgets, one per monitor, reach this via
+// worker, which also lists your local music folders (local files play in
+// the same mpv and queue). Bar widgets, one per monitor, reach this via
 // bar.shell.serviceFor("damir.ytmusic").
 Item {
   id: root
@@ -36,7 +37,8 @@ Item {
   property real position: 0
   property int volume: 100
   property var playlist: []
-  // videoId -> Track; mirrored into mpv's user-data/ytm/meta.
+  // Track key (videoId, or a local file's path) -> Track; mirrored into
+  // mpv's user-data/ytm/meta.
   property var meta: ({})
 
   // ---- player modes -------------------------------------------------------------
@@ -114,9 +116,9 @@ Item {
     for (var key in meta) next[key] = meta[key]
     var changed = false
     for (var i = 0; i < tracks.length; i++) {
-      var track = tracks[i]
-      if (track && track.videoId) {
-        next[track.videoId] = track
+      var key = Model.trackKey(tracks[i])
+      if (key) {
+        next[key] = tracks[i]
         changed = true
       }
     }
@@ -127,7 +129,7 @@ Item {
   }
 
   function playNow(track) {
-    if (!track || !track.videoId) return false
+    if (!Model.trackKey(track)) return false
     remember([track])
     withStream(track, function() {
       mpv.commands(Model.playNowCommands(track, { count: root.playlistCount, pos: root.playlistPos }))
@@ -221,8 +223,16 @@ Item {
   }
 
   // Run `start` once the track's stream is resolved (or after a failure or
-  // 10 s, when mpv resolves it through yt-dlp itself). Only the latest runs.
+  // 10 s, when mpv resolves it through yt-dlp itself). Only the latest runs;
+  // a local file starts right away and supersedes a play still waiting.
   function withStream(track, start) {
+    if (!track.videoId) {
+      _playToken++
+      _pendingPlay = null
+      pendingFallback.stop()
+      start()
+      return
+    }
     if (streamFor(track.videoId)) {
       pushStreams()
       start()
@@ -377,10 +387,10 @@ Item {
   // (idle timeout, logout, reboot).
   readonly property string cacheDir: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache")) + "/omarchy-ytmusic"
   property var session: null
-  readonly property bool canResume: !mpv.up && !!session && session.videoIds.length > 0
+  readonly property bool canResume: !mpv.up && !!session && session.keys.length > 0
   readonly property string resumeTitle: {
     if (!session || !session.meta) return ""
-    var track = session.meta[session.videoIds[session.index]]
+    var track = session.meta[session.keys[session.index]]
     return track ? Model.mediaTitle(track) : ""
   }
 
@@ -439,14 +449,14 @@ Item {
   }
 
   function playNext(track) {
-    if (!track || !track.videoId) return false
+    if (!Model.trackKey(track)) return false
     remember([track])
     mpv.commands(Model.playNextCommands(track))
     return true
   }
 
   function addToQueue(track) {
-    if (!track || !track.videoId) return false
+    if (!Model.trackKey(track)) return false
     remember([track])
     mpv.commands(Model.addToQueueCommands(track))
     return true
@@ -576,7 +586,7 @@ Item {
   // Only looked up while a panel shows it; results are cached per videoId.
   function refreshLikeStatus() {
     var track = currentTrack
-    if (!signedIn || !track || likeStatusOf(track) !== null) return
+    if (!signedIn || !track || !track.videoId || likeStatusOf(track) !== null) return
     backend.request("likeStatus", { videoId: track.videoId }, function(reply) {
       if (reply.ok && reply.result.likeStatus) storeItem.setLike(track.videoId, reply.result.likeStatus)
     })
@@ -649,6 +659,14 @@ Item {
     var text = String(query || "").trim()
     if (text !== "") store.search(text, "")
     store.requestTab("search")
+    if (shell && typeof shell.summon === "function") shell.summon(pluginId)
+    return true
+  }
+
+  // Open the panel on a tab: now | search | library | home | local.
+  function showTab(key) {
+    if (["now", "search", "library", "home", "local"].indexOf(key) === -1) return false
+    store.requestTab(key)
     if (shell && typeof shell.summon === "function") shell.summon(pluginId)
     return true
   }
@@ -924,9 +942,9 @@ Item {
       volume: volume,
       position: position,
       duration: duration,
-      current: currentTrack ? { videoId: currentTrack.videoId, title: currentTrack.title, artists: currentTrack.artistText } : null,
+      current: currentTrack ? { videoId: currentTrack.videoId, path: currentTrack.path || null, title: currentTrack.title, artists: currentTrack.artistText } : null,
       queueIndex: playlistPos,
-      queue: queue.map(function(entry) { return entry.videoId }),
+      queue: queue.map(function(entry) { return entry.key }),
       player: {
         autoplay: autoplay,
         autoplayWanted: autoplayWanted,
@@ -950,7 +968,7 @@ Item {
         canResume: canResume,
         index: session ? session.index : -1,
         timePos: session ? session.timePos : 0,
-        tracks: session ? session.videoIds.length : 0
+        tracks: session ? session.keys.length : 0
       },
       search: {
         query: storeItem.query,
@@ -1183,6 +1201,7 @@ Item {
     function repeat(): string { root.cycleRepeat(); return root.repeatPref }
     function autoplay(): string { root.toggleAutoplay(); return root.autoplay ? "on" : "off" }
     function search(query: string): string { return root.showSearch(query) ? "ok" : "unhandled" }
+    function tab(name: string): string { return root.showTab(name) ? "ok" : "unknown tab" }
     function like(): string { return root.setLike(root.currentTrack, true) ? "ok" : "unhandled" }
     function unlike(): string { return root.setLike(root.currentTrack, false) ? "ok" : "unhandled" }
     function toggleLike(): string { return root.toggleLike(root.currentTrack) ? "ok" : "unhandled" }

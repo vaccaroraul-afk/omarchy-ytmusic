@@ -29,7 +29,8 @@ Plugin id `damir.ytmusic` · the Omarchy logo is from [basecamp/omarchy](https:/
 YouTube Music for the Omarchy bar without a browser: a native panel inside
 `omarchy-shell`, [ytmusicapi](https://github.com/sigma67/ytmusicapi) for search
 and your library, and mpv (with yt-dlp) for audio-only streaming. Nothing is
-downloaded to disk.
+downloaded to disk. The **Local** tab plays the music folders on your disk in
+the same player and queue.
 
 Version 1.0.0. Not affiliated with YouTube or Google: it uses the unofficial
 ytmusicapi and yt-dlp, which can break when YouTube changes something
@@ -41,6 +42,7 @@ ytmusicapi and yt-dlp, which can break when YouTube changes something
 - 🎶 **Queue** with shuffle, repeat and autoplay (similar songs when it runs out)
 - 📚 **Your library**: playlists (create, add, remove, delete), likes and Liked Music, History, Home
 - 👤 **Artist and album pages**, one click from what's playing
+- 💽 **Local music**: browse `~/Music` by folder, with tags and covers; local files and YouTube songs share one queue
 - ⏯️ **Media keys and OSD** over MPRIS; the bar shows an icon or scrolling now-playing text
 - ⚡ **Fast starts**: streams are looked up ahead, pages and covers come from a disk cache
 - 🪶 **Light**: no browser; ~75 MiB while playing, nothing when idle; resumes where you stopped
@@ -94,13 +96,14 @@ follow symlinks) and run `scripts/test.sh`.
 |---|---|
 | Bar icon | Left click: open/close the panel · Middle click: play/pause · Right click: switch icon ⇄ now-playing text · Wheel: previous/next track |
 | `SUPER + M` | Open/close the panel (`omarchy-shell shell toggle damir.ytmusic`, bound in `~/.config/hypr/bindings.lua`) |
-| Panel tabs | **Now** (playing + queue, like, add to playlist, Resume; an artist, the album or the cover opens its page), **Search** (field, filters, grouped results), **Library** (account, Liked Music, History, your and saved playlists, new playlist) and **Home** (your shelves); albums, playlists and artists open as pages with Play / Shuffle / Queue all; your own playlists can remove songs and be deleted |
+| Panel tabs | **Now** (playing + queue, like, add to playlist, Resume; an artist, the album or the cover opens its page), **Search** (field, filters, grouped results), **Library** (account, Liked Music, History, your and saved playlists, new playlist), **Home** (your shelves) and **Local** (your music folders); albums, playlists, artists and folders open as pages with Play / Shuffle / Queue all; your own playlists can remove songs and be deleted |
+| Local | Your music directory: `XDG_MUSIC_DIR` (`~/Music`; change it with `xdg-user-dirs-update --set MUSIC DIR`), or several folders separated by `:` in `YTM_MUSIC_DIRS`. Folders open as pages; a song plays its folder from there, and a folder's Play / Shuffle / Queue all include its subfolders (up to 5000 songs). Titles, artists, album, track numbers and durations come from the tags ([mutagen](https://github.com/quodlibet/mutagen), cached in `~/.cache/omarchy-ytmusic/local-tags.json`), the cover from an image in the folder (`cover.jpg`, `folder.png`, …) or the first song's embedded picture. 󰑐 reads a folder again. Likes, playlists and autoplay are YouTube Music's, so local songs have none of them. |
 | Resume | After mpv has quit (idle timeout, logout, reboot) play/pause — middle click, media keys, `omarchy-shell ytmusic resume` or the Resume button — restores the queue, the track and its position. The snapshot is `~/.cache/omarchy-ytmusic/session.json`, saved after queue changes, on pause and every 30 s while playing. |
 | Search | Results appear as you type. An empty field lists your recent searches (`x` forgets one); while typing, matching recent searches and YouTube Music's suggestions show above the results — click one, or `Tab` / `Shift+Tab` to put it in the field. A search is remembered only when it led somewhere (Enter, or a result was played, opened or queued), in `~/.cache/omarchy-ytmusic/searches.json`. |
 | Shuffle / repeat | Buttons around the transport (or `s` / `r`). Shuffle mixes the songs after the current one and turning it off puts them back in their order (songs added meanwhile keep their places); with shuffle on, a clicked song plays first and the rest of its album or playlist follows shuffled, and a page's **Shuffle** button turns it on. Repeat cycles off → queue → this song (mpv's `loop-playlist` / `loop-file`, so MPRIS sees it too). Both are remembered in `~/.cache/omarchy-ytmusic/player.json`. |
 | Autoplay | On by default (**Autoplay** in the queue header, IPC `autoplay`): five seconds into the last song of the queue, up to 10 songs from YouTube Music's up-next list for it are appended — songs before videos, nothing that is already in the queue. Off while repeat is on. |
-| Panel keys | `1`–`4` switch tabs · `/` search · `j`/`k` or `↑`/`↓` move · `Enter` play or open · `n` play next · `a` add to queue · `L` like · `p` add to playlist · `A` / `o` open the artist / album (of the selected or current song) · `J`/`K` move a queued track · `x` remove (queue, own playlist, Liked Music, recent search) · `s` shuffle · `r` repeat · `Space` play/pause · `←`/`→` seek 10 s · `Esc` leave the field → close the picker → back → close. Shortcuts are off while typing. |
-| IPC | `search "query"` (opens the panel on the results) · `shuffle` / `repeat` / `autoplay` (toggle or cycle, print the new state) · `like` / `unlike` / `toggleLike` (current track) · `signIn` / `signOut` / `reloadAuth` |
+| Panel keys | `1`–`5` switch tabs · `/` search · `j`/`k` or `↑`/`↓` move · `Enter` play or open · `n` play next · `a` add to queue · `L` like · `p` add to playlist · `A` / `o` open the artist / album (of the selected or current song) · `J`/`K` move a queued track · `x` remove (queue, own playlist, Liked Music, recent search) · `s` shuffle · `r` repeat · `Space` play/pause · `←`/`→` seek 10 s · `Esc` leave the field → close the picker → back → close. Shortcuts are off while typing. |
+| IPC | `search "query"` (opens the panel on the results) · `tab local` (opens the panel on a tab: `now`, `search`, `library`, `home`, `local`) · `shuffle` / `repeat` / `autoplay` (toggle or cycle, print the new state) · `like` / `unlike` / `toggleLike` (current track) · `signIn` / `signOut` / `reloadAuth` |
 
 ### Signing in
 
@@ -125,7 +128,7 @@ closes, so it holds no memory while you're not looking at it.
 flowchart LR
     subgraph shell["omarchy-shell (Quickshell)"]
         bar["Bar widget<br/>icon or now playing"]
-        panel["Panel<br/>Now · Search · Library · Home"]
+        panel["Panel<br/>Now · Search · Library · Home · Local"]
         svc["Service<br/>queue · state · IPC"]
         bar --> svc
         panel --> svc
@@ -160,6 +163,7 @@ after it closes.
 | `backend/ytm.py` | ytmusicapi worker (`serve`) and CLI; PEP 723 script run with `uv` |
 | `backend/ytm_normalize.py` | Turns ytmusicapi responses into stable Track/Album/Playlist/Artist/Collection shapes |
 | `backend/ytm_auth.py` | Session files and sign-in (browser cookie import, pasted headers) |
+| `backend/ytm_local.py` | Local music: folder listings, tags (mutagen) and covers, only inside the music directories |
 | `bin/ytm` | CLI wrapper (`uv run --script backend/ytm.py`, no bytecode) |
 | `scripts/test.sh` | Fixture secrets check + node + pytest, without caches |
 | `scripts/mem.sh` | PSS report: shell, mpv unit, worker |
@@ -171,7 +175,7 @@ Private files live outside this repository:
 |---|---|
 | `~/.config/omarchy-ytmusic/` (0700) | `browser.json`, `cookies.txt` (0600), `account.json` |
 | `$XDG_RUNTIME_DIR/omarchy-ytmusic/` (0700) | mpv IPC socket |
-| `~/.cache/omarchy-ytmusic/` (0700) | resume snapshot (`session.json`), player modes (`player.json`), recent searches (`searches.json`), response and cover caches |
+| `~/.cache/omarchy-ytmusic/` (0700) | resume snapshot (`session.json`), player modes (`player.json`), recent searches (`searches.json`), response and cover caches, local tags (`local-tags.json`) and embedded covers (`local-art/`) |
 
 ## Commands
 
@@ -183,6 +187,7 @@ omarchy-shell ytmusic queue "nils frahm says"   # search songs, add the best mat
 omarchy-shell ytmusic playPause|next|previous|stop
 omarchy-shell ytmusic seek 90
 omarchy-shell ytmusic volume 60
+omarchy-shell ytmusic tab local                 # open the panel on the Local tab
 bin/ytm-mpv start|stop|status
 scripts/mem.sh
 
@@ -191,6 +196,7 @@ bin/ytm auth --paste              # fallback: paste request headers of a /browse
 bin/ytm whoami | logout
 bin/ytm search daft punk --filter songs
 bin/ytm call libraryPlaylists '{"limit": 5}'
+bin/ytm call localFolder '{"path": ""}'      # the top of your music folders
 bin/ytm selftest --online
 scripts/test.sh
 ```
@@ -206,6 +212,7 @@ scripts/test.sh
 | No bar icon | `omarchy plugin list \| grep ytmusic`, `omarchy plugin validate ~/.config/omarchy/plugins/damir.ytmusic`. |
 | Something odd | `omarchy-shell ytmusic status \| jq` (player, worker, auth, last error), `bin/ytm selftest --online`, `journalctl --user -b \| grep ytmusic`. mpv itself runs with `--no-terminal`, so it logs almost nothing. |
 | A QML change doesn't show | `omarchy restart shell` (hot reload keeps the old compiled QML). |
+| Local tab is empty or says a folder doesn't exist | It lists `xdg-user-dir MUSIC` (or `YTM_MUSIC_DIRS`); `bin/ytm selftest` shows the folders it found. New files show up after 5 minutes, or right away with 󰑐. |
 | Start over | `bin/ytm logout` and `rm -rf ~/.cache/omarchy-ytmusic`. |
 
 ## Security
@@ -224,6 +231,8 @@ Checked in Phase 7 (2026-09-11):
   shell writes `session.json`, `player.json` and `searches.json` with the
   default umask (0644); the 0700 directory keeps them private.
 - Covers are only downloaded over HTTPS from YouTube/Google image hosts.
+- The worker lists only folders inside your music directories; any other
+  path (including `..` tricks) is refused with `BAD_REQUEST`.
 - External text never reaches a shell: notifications and processes get
   argument arrays, mpv titles use byte-length quoting, and the only `sh -c`
   (mkdir for the cache) takes the path as `$1`.
@@ -236,9 +245,9 @@ Checked in Phase 7 (2026-09-11):
 
 The shell runs `bin/ytm serve` and talks JSON lines over stdin/stdout. The
 worker exits on stdin EOF or after 180 s without requests. Requests are
-answered in order, except `resolve` and `suggestions`, which run on their
-own threads so a stream lookup or a completion never waits for (or delays)
-the requests around it.
+answered in order, except `resolve`, `suggestions` and `localFolder`, which
+run on their own threads so a stream lookup, a completion or reading a big
+folder never waits for (or delays) the requests around it.
 
 ```jsonc
 {"id":1,"method":"search","params":{"query":"daft punk","filter":"songs"}}
@@ -250,7 +259,7 @@ the requests around it.
 Methods: `ping`, `hello`, `reloadAuth`, `verifyAuth`, `search`, `suggestions`, `home`,
 `history`, `libraryPlaylists`, `playlist`, `liked`, `album`, `artist`, `song`,
 `upNext` (autoplay), `likeStatus`, `rate`, `createPlaylist`, `addToPlaylist`, `removeFromPlaylist`,
-`deletePlaylist`, `shutdown`. Error codes: `AUTH_REQUIRED`, `AUTH_EXPIRED`,
+`deletePlaylist`, `localFolder` (`path`, `recursive`), `shutdown`. Error codes: `AUTH_REQUIRED`, `AUTH_EXPIRED`,
 `BAD_REQUEST`, `NOT_FOUND`, `NETWORK`, `RATE_LIMITED` (retryable), `UPSTREAM`
 (unexpected response; ytmusicapi may need an update), `INTERNAL`.
 

@@ -308,8 +308,8 @@ test("session snapshot round-trips into resume commands", () => {
     { videoId: "", known: false, track: {} },
   ]
   const snap = Model.sessionSnapshot(queue, 1, 93.7, 80, 5)
-  assert.deepEqual(snap, { version: 1, savedAt: 5, index: 1, timePos: 93, volume: 80,
-    videoIds: [id11(1), id11(2)], meta: { [id11(1)]: known } })
+  assert.deepEqual(snap, { version: 2, savedAt: 5, index: 1, timePos: 93, volume: 80,
+    keys: [id11(1), id11(2)], meta: { [id11(1)]: known } })
   assert.deepEqual(Model.parseSession(JSON.stringify(snap)), snap)
   assert.equal(Model.parseSession("{}"), null)
   assert.equal(Model.parseSession("garbage"), null)
@@ -321,6 +321,72 @@ test("session snapshot round-trips into resume commands", () => {
   assert.deepEqual(plan.commands.slice(-2), [["playlist-play-index", 1], ["set_property", "pause", false]])
   assert.equal(plan.tracks[1].videoId, id11(2), "unknown tracks get a placeholder")
   assert.deepEqual(Model.resumeCommands(null).commands, [])
+})
+
+test("version 1 sessions (videoIds) still resume", () => {
+  const v1 = { version: 1, savedAt: 5, index: 0, timePos: 12, volume: 70, videoIds: [id11(1)], meta: {} }
+  const session = Model.parseSession(JSON.stringify(v1))
+  assert.deepEqual(session.keys, [id11(1)])
+  assert.equal(Model.resumeCommands(session).commands[1][1], Model.trackUrl(id11(1)))
+  assert.equal(Model.parseSession(JSON.stringify({ version: 3, keys: [] })), null)
+})
+
+// ---- local files ----------------------------------------------------------------
+
+const song = (path, extra = {}) => ({ type: "track", local: true, path, videoId: "", title: "Local " + path,
+  artistText: "Me", available: true, ...extra })
+
+test("local tracks are keyed and loaded by their path", () => {
+  const path = "/home/me/Music/Album/01 Intro, part 1.flac"
+  const t = song(path)
+  assert.equal(Model.trackKey(t), path)
+  assert.equal(Model.trackKey(track(id11(1))), id11(1))
+  assert.equal(Model.trackKey(null), "")
+  assert.equal(Model.mediaUrl(t), path)
+  assert.equal(Model.mediaUrl(track(id11(1))), Model.trackUrl(id11(1)))
+  assert.equal(Model.keyFromUrl(path), path)
+  assert.equal(Model.keyFromUrl(Model.trackUrl(id11(2))), id11(2))
+  assert.equal(Model.keyFromUrl("relative/file.mp3"), "")
+  assert.equal(Model.playable(t), true)
+  assert.equal(Model.playable(song("")), false)
+  const [cmd] = Model.playNowCommands(t, { count: 0, pos: -1 })
+  assert.deepEqual(cmd.slice(0, 3), ["loadfile", path, "replace"])
+  const plan = Model.playCollectionCommands([t, track(id11(1))], 0, false)
+  assert.deepEqual(plan.commands.slice(1, 3).map(c => c[1]), [path, Model.trackUrl(id11(1))])
+})
+
+test("queues mix local files and YouTube tracks", () => {
+  const path = "/m/Album/02 Song.opus"
+  const meta = { [path]: song(path), [id11(1)]: track(id11(1)) }
+  const playlist = [{ filename: path, id: 1 }, { filename: Model.trackUrl(id11(1)), id: 2, current: true },
+    { filename: "/m/Other/03 Unknown.mp3", id: 3 }]
+  const queue = Model.buildQueue(playlist, meta)
+  assert.deepEqual(queue.map(e => [e.key, e.videoId, e.known]),
+    [[path, "", true], [id11(1), id11(1), true], ["/m/Other/03 Unknown.mp3", "", false]])
+  assert.equal(queue[0].track, meta[path])
+  const unknown = queue[2].track
+  assert.deepEqual([unknown.title, unknown.local, unknown.path, unknown.videoId], ["03 Unknown", true, "/m/Other/03 Unknown.mp3", ""])
+  assert.deepEqual(Model.unknownVideoIds(queue), [], "local files are never looked up on YouTube")
+  assert.deepEqual(Object.keys(Model.pruneMeta(meta, playlist.slice(0, 1))), [path])
+  assert.deepEqual(Model.streamsToResolve(queue, 1, {}, 0, 1, true), [], "no streams for local files")
+  const snap = Model.sessionSnapshot(queue, 1, 30, 70, 9)
+  assert.deepEqual(snap.keys, [path, id11(1), "/m/Other/03 Unknown.mp3"])
+  const resumed = Model.resumeCommands(Model.parseSession(JSON.stringify(snap)))
+  assert.deepEqual(resumed.commands.slice(1, 4).map(c => c[1]), [path, Model.trackUrl(id11(1)), "/m/Other/03 Unknown.mp3"])
+  assert.equal(resumed.tracks[2].title, "03 Unknown")
+})
+
+test("folder pages: subfolders, then songs indexed for playback", () => {
+  const page = { folders: [{ type: "folder", path: "/m/A", title: "A", subtitle: "3 songs" }],
+    tracks: [song("/m/x.flac"), song("/m/y.flac")] }
+  assert.deepEqual(Model.folderRows(page).map(r => r.header ? "# " + r.title : r.item.type + (r.trackIndex ?? "")),
+    ["# Folders", "folder", "# Songs", "track0", "track1"])
+  assert.deepEqual(Model.folderRows({ tracks: page.tracks }).map(r => r.trackIndex), [0, 1])
+  assert.deepEqual(Model.folderRows(null), [])
+  assert.deepEqual(Model.collectionTarget({ type: "folder", path: "/m/A" }), { kind: "folder", id: "/m/A" })
+  assert.deepEqual(Model.collectionTarget({ type: "folder" }), { kind: "folder", id: "" })
+  assert.equal(Model.itemSubtitle(page.folders[0]), "3 songs")
+  assert.equal(Model.itemSubtitle({ type: "folder" }), "Folder")
 })
 
 test("withoutTrack removes one entry, preferring setVideoId", () => {

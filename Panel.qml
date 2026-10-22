@@ -7,10 +7,10 @@ import "components"
 // The YouTube Music dropdown. BarWidget.qml loads this and injects the bar,
 // the anchor button, the widget itself (bar identity) and the service.
 //
-// Tabs: Now (playing + queue), Search, Library and Home, with a page stack on
-// top for albums, playlists, Liked Music, History and artists, and the
-// playlist picker.
-// Keys: 1–4 tabs · / search · j/k or ↑/↓ move · Enter play/open · n play next ·
+// Tabs: Now (playing + queue), Search, Library, Home and Local (your music
+// folders), with a page stack on top for albums, playlists, Liked Music,
+// History, artists and folders, and the playlist picker.
+// Keys: 1–5 tabs · / search · j/k or ↑/↓ move · Enter play/open · n play next ·
 // a add to queue · L like · p add to playlist · J/K move in queue ·
 // x remove (queue, playlist page, Liked Music) · Space play/pause ·
 // ←/→ seek 10 s (Now) · Esc leave field → close picker → back → close.
@@ -43,7 +43,8 @@ Panel {
     { key: "now", title: "Now" },
     { key: "search", title: "Search" },
     { key: "library", title: "Library" },
-    { key: "home", title: "Home" }
+    { key: "home", title: "Home" },
+    { key: "local", title: "Local" }
   ]
 
   function setTab(key) {
@@ -85,6 +86,7 @@ Panel {
     if (tab === "search") return searchView
     if (tab === "library") return libraryView
     if (tab === "home") return homeView
+    if (tab === "local") return localLoader.item
     return null
   }
 
@@ -228,6 +230,7 @@ Panel {
         else if (text === "2" || text === "/") root.setTab("search")
         else if (text === "3") root.setTab("library")
         else if (text === "4") root.setTab("home")
+        else if (text === "5") root.setTab("local")
         else if (text === "n") root.listAction("next")
         else if (text === "a") root.listAction("queue")
         else if (text === "L" && root.service) root.service.toggleLike(root.cursorTrack())
@@ -423,6 +426,21 @@ Panel {
           service: root.service
           bar: root.bar
           onOpenRequested: function(item) { root.push(item) }
+        }
+
+        // The top of your music folders, as a folder page. Only loaded while
+        // the tab is open (folders it opens go on the page stack).
+        Loader {
+          id: localLoader
+          anchors.fill: parent
+          visible: root.tab === "local" && !root.page
+          active: root.tab === "local"
+          sourceComponent: CollectionView {
+            service: root.service
+            bar: root.bar
+            target: ({ type: "folder", path: "", title: "Local music" })
+            onOpenRequested: function(item) { root.push(item) }
+          }
         }
 
         Loader {

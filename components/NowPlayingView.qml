@@ -17,7 +17,8 @@ Column {
   readonly property real duration: service ? service.duration : 0
   readonly property real position: service ? service.position : 0
   readonly property bool liked: !!service && service.currentLike === "LIKE"
-  readonly property bool accountActions: !!service && service.signedIn && hasMedia
+  // Likes and playlists are YouTube Music's; local files have neither.
+  readonly property bool accountActions: !!service && service.signedIn && hasMedia && !!track && !!track.videoId
 
   readonly property bool albumLinked: !!track && !!track.album && !!track.album.id
 
@@ -122,7 +123,7 @@ Column {
         width: parent.width
         textFormat: Text.PlainText
         text: root.service && root.service.canResume ? "Pick up where you left off:"
-          : "Search (2) or open Home (4) to pick something."
+          : "Search (2), open Home (4) or Local (5) to pick something."
         visible: !root.track
         color: Qt.darker(root.foreground, 1.3)
         font.family: root.fontFamily

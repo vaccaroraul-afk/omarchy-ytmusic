@@ -3,8 +3,9 @@ import Quickshell.Io
 import "YtmModel.js" as Model
 
 // Data the panel shows, kept in the service so it outlives panel unloads and
-// is shared by every monitor: searches, opened collections, the library,
-// likes, cover thumbnails on disk, and tab requests coming in over IPC.
+// is shared by every monitor: searches, opened collections (local folders
+// too), the library, likes, cover thumbnails on disk, and tab requests
+// coming in over IPC.
 //
 // Collections and the library are loaded stale-while-revalidate: the worker's
 // disk cache answers first (instantly), then a fresh copy replaces it.
@@ -169,7 +170,7 @@ Item {
     _searches = next
   }
 
-  // ---- collections (album / playlist / liked / artist pages) -------------------
+  // ---- collections (album / playlist / liked / artist / folder pages) ----------
   readonly property int collectionTtlMs: 5 * 60 * 1000
   readonly property int maxCollections: 5
   property var _collections: ({})
@@ -186,6 +187,15 @@ Item {
       callback({ ok: true, result: entry.data })
       return
     }
+    // Local folders skip the worker's response cache: listing one is quick,
+    // and the worker keeps their tags cached itself.
+    if (kind === "folder") {
+      worker.request("localFolder", { path: id }, function(reply) {
+        if (reply.ok) root._remember(key, reply.result)
+        callback(reply)
+      }, 60000)
+      return
+    }
     var method = kind === "album" ? "album" : kind === "artist" ? "artist" : kind === "liked" ? "liked"
       : kind === "history" ? "history" : "playlist"
     var params = kind === "album" ? { browseId: id } : kind === "artist" ? { channelId: id }
@@ -198,6 +208,12 @@ Item {
       }
       callback(reply)
     })
+  }
+
+  // Every song inside a local folder and its subfolders (Play / Shuffle /
+  // Queue all on a folder page).
+  function loadFolderTracks(path, callback) {
+    worker.request("localFolder", { path: path, recursive: true }, callback, 60000)
   }
 
   // History comes back as a plain list; pages want a collection.

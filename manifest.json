@@ -4,7 +4,7 @@
   "name": "YouTube Music",
   "version": "1.0.0",
   "author": "Damir Sagi",
-  "description": "YouTube Music in a native bar panel: ytmusicapi for search and library, mpv for audio-only playback. No browser.",
+  "description": "YouTube Music in a native bar panel: ytmusicapi for search and library, mpv for audio-only playback, plus your local music folders. No browser.",
   "kinds": [
     "service",
     "bar-widget"

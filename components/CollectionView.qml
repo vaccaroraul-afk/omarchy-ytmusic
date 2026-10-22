@@ -3,14 +3,15 @@ import qs.Commons
 import qs.Ui
 import "../YtmModel.js" as Model
 
-// An album, playlist, Liked Music or artist page: header with Play, Shuffle
-// and Queue all, then its tracks (and an artist's albums and singles).
+// An album, playlist, Liked Music, artist or local folder page: header with
+// Play, Shuffle and Queue all, then its tracks (and an artist's albums and
+// singles, a folder's subfolders).
 Item {
   id: root
 
   property var service: null
   property QtObject bar: null
-  // The item that was opened (album / playlist / artist / { type: "liked" }).
+  // The item that was opened (album / playlist / artist / folder / { type: "liked" }).
   property var target: null
 
   property var page: null
@@ -24,11 +25,15 @@ Item {
   readonly property bool isArtist: !!ref && ref.kind === "artist"
   readonly property bool isLiked: !!ref && ref.kind === "liked"
   readonly property bool isHistory: !!ref && ref.kind === "history"
+  readonly property bool isFolder: !!ref && ref.kind === "folder"
+  // Collecting a folder's songs from its subfolders for Play / Shuffle / Queue all.
+  property bool gathering: false
   readonly property bool editable: !!page && page.editable === true
   property bool confirmDelete: false
   readonly property var tracks: !page ? [] : isArtist ? (page.songs || []) : (page.tracks || [])
   readonly property var rows: !page ? [] : isArtist ? Model.flattenArtist(page)
-    : isHistory ? Model.historyRows(tracks) : Model.trackRows(tracks)
+    : isHistory ? Model.historyRows(tracks) : isFolder ? Model.folderRows(page) : Model.trackRows(tracks)
+  readonly property bool hasSongs: tracks.length > 0 || (isFolder && !!page && page.folderCount > 0)
   readonly property alias results: resultList
 
   readonly property string title: page ? (page.title || page.name || "") : (target ? (target.title || target.name || "") : "")
@@ -71,6 +76,29 @@ Item {
     id: confirmReset
     interval: 4000
     onTriggered: root.confirmDelete = false
+  }
+
+  // A folder's buttons take the songs in its subfolders too.
+  function withAllTracks(run) {
+    if (!isFolder || !page || !(page.folderCount > 0)) {
+      run(tracks)
+      return
+    }
+    var path = page.id
+    gathering = true
+    store.loadFolderTracks(path, function(reply) {
+      root.gathering = false
+      if (!root.page || root.page.id !== path) return
+      if (reply.ok) run(reply.result.tracks || [])
+      else root.error = reply.error.message
+    })
+  }
+
+  // Read a folder again (new or changed files).
+  function rescan() {
+    if (!store || !ref) return
+    store.forgetCollection(ref.kind, ref.id)
+    load()
   }
 
   function load() {
@@ -155,29 +183,48 @@ Item {
       Flow {
         width: parent.width
         spacing: Style.space(4)
-        visible: root.tracks.length > 0
+        visible: root.hasSongs || root.isFolder
 
         Button {
+          visible: root.hasSongs
+          enabled: !root.gathering
+          opacity: enabled ? 1 : 0.4
           iconText: "󰐊"
           text: "Play"
+          tooltipText: root.isFolder && root.page && root.page.folderCount > 0 ? "Play everything in this folder and its subfolders" : ""
           foreground: root.foreground
           fontSize: Style.font.caption
-          onClicked: root.service.playCollection(root.tracks, 0, false)
+          onClicked: root.withAllTracks(function(list) { root.service.playCollection(list, 0, false) })
         }
 
         Button {
+          visible: root.hasSongs
+          enabled: !root.gathering
+          opacity: enabled ? 1 : 0.4
           text: "Shuffle"
           tooltipText: "Turn shuffle on and play in random order"
           foreground: root.foreground
           fontSize: Style.font.caption
-          onClicked: root.service.playCollection(root.tracks, 0, true)
+          onClicked: root.withAllTracks(function(list) { root.service.playCollection(list, 0, true) })
         }
 
         Button {
+          visible: root.hasSongs
+          enabled: !root.gathering
+          opacity: enabled ? 1 : 0.4
           text: "Queue all"
           foreground: root.foreground
           fontSize: Style.font.caption
-          onClicked: root.service.queueAll(root.tracks)
+          onClicked: root.withAllTracks(function(list) { root.service.queueAll(list) })
+        }
+
+        Button {
+          visible: root.isFolder
+          iconText: "󰑐"
+          tooltipText: "Read the folder again"
+          foreground: root.foreground
+          fontSize: Style.font.caption
+          onClicked: root.rescan()
         }
 
         Button {
