@@ -131,14 +131,28 @@ Column {
         wrapMode: Text.Wrap
       }
 
+      // Kept out of the button: Button neither elides nor clips, so a long
+      // title would spill over the cover and past the panel edge.
+      Text {
+        width: parent.width
+        textFormat: Text.PlainText
+        text: root.service ? root.service.resumeTitle : ""
+        visible: !root.track && !!root.service && root.service.canResume && text !== ""
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.Wrap
+        maximumLineCount: 2
+        elide: Text.ElideRight
+      }
+
       Button {
         visible: !root.track && !!root.service && root.service.canResume
         iconText: "󰐊"
-        text: root.service && root.service.resumeTitle !== "" ? "Resume " + root.service.resumeTitle : "Resume"
+        text: "Resume"
         tooltipText: "Restore the queue and continue the song where it stopped"
         foreground: root.foreground
         fontSize: Style.font.caption
-        width: Math.min(implicitWidth, parent.width)
         onClicked: root.service.resume()
       }
 
