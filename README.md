@@ -63,9 +63,15 @@ this plugin, idle                                                     0 MiB
 
 ## Install
 
+This is a fork of
+[Damir-VistaBlox/omarchy-ytmusic](https://github.com/Damir-VistaBlox/omarchy-ytmusic)
+that adds the Local tab, sign-in from Omarchy's default browser and a few
+bar and panel fixes. Both use the plugin id `damir.ytmusic`, so install one
+or the other.
+
 ```bash
 omarchy-pkg-add uv deno    # mpv, mpv-mpris and yt-dlp already come with Omarchy
-omarchy plugin add https://github.com/Damir-VistaBlox/omarchy-ytmusic.git --enable
+omarchy plugin add https://github.com/vaccaroraul-afk/omarchy-ytmusic.git --enable
 ```
 
 `uv` runs the ytmusicapi helper (it builds its own Python environment on
